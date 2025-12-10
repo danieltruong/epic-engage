@@ -59,44 +59,17 @@ class TestAnalyticsIntegration:
         assert result is True
         assert provider.is_enabled() is True
 
-    def test_track_survey_submission_disabled(self):
-        """Test tracking when provider is disabled."""
+    def test_track_self_describing_event_disabled(self):
+        """Test tracking self-describing event when provider is disabled."""
         provider = SnowplowAnalyticsProvider()
         provider.initialize({'enabled': False})
 
-        result = provider.track_survey_submission(
-            survey_id=123,
-            engagement_id=456,
-            submission_id=789
+        result = provider.track_self_describing_event(
+            schema='iglu:ca.bc.gov.met/test-event/jsonschema/1-0-0',
+            data={'survey_id': 123, 'engagement_id': 456}
         )
 
         assert result is True  # Should succeed even when disabled
-
-    def test_track_email_verification_disabled(self):
-        """Test email verification tracking when disabled."""
-        provider = SnowplowAnalyticsProvider()
-        provider.initialize({'enabled': False})
-
-        result = provider.track_email_verification(
-            survey_id=123,
-            engagement_id=456,
-            verification_type='survey'
-        )
-
-        assert result is True
-
-    def test_track_error_disabled(self):
-        """Test error tracking when disabled."""
-        provider = SnowplowAnalyticsProvider()
-        provider.initialize({'enabled': False})
-
-        result = provider.track_error(
-            error_type='ValidationError',
-            error_message='Test error',
-            properties={'endpoint': '/api/test', 'status_code': 400}
-        )
-
-        assert result is True
 
     def test_analytics_event_creation(self):
         """Test creating an analytics event."""
@@ -134,20 +107,22 @@ class TestAnalyticsIntegration:
         assert isinstance(event_dict['properties'], dict)
         assert isinstance(event_dict['context'], dict)
 
-    def test_convenience_functions_with_disabled_manager(self):
-        """Test convenience functions when manager is not initialized."""
+    def test_convenience_function_track_event(self):
+        """Test track_event convenience function when manager is not initialized."""
         # Reset the global manager
         analytics._analytics_manager = None
 
-        # These should not raise exceptions
-        result1 = analytics.track_survey_submission(123, 456)
-        result2 = analytics.track_email_verification(123, 456)
-        result3 = analytics.track_error('TestError', 'test message')
+        event = AnalyticsEvent(
+            event_type='test_event',
+            category='test',
+            action='test_action'
+        )
 
-        # All should return True (graceful degradation)
-        assert result1 is True
-        assert result2 is True
-        assert result3 is True
+        # Should not raise exception
+        result = analytics.track_event(event)
+
+        # Should return True (graceful degradation)
+        assert result is True
 
     def test_manager_tracks_with_multiple_providers(self):
         """Test manager tracks events across multiple providers."""
@@ -161,8 +136,15 @@ class TestAnalyticsIntegration:
 
         manager.initialize(provider1, [provider2])
 
+        # Create a generic event
+        event = AnalyticsEvent(
+            event_type='test_event',
+            category='test',
+            action='test_action'
+        )
+
         # Should track to both providers
-        result = manager.track_survey_submission(123, 456)
+        result = manager.track_event(event)
         assert result is True
 
     @patch('met_api.utils.snowplow_tracker.get_tracker')
@@ -191,9 +173,12 @@ class TestAnalyticsIntegration:
         provider.initialize({'enabled': True})
         # Tracker is not properly initialized, but should not crash
 
-        result = provider.track_survey_submission(123, 456)
-        # Should return False due to missing tracker, but not raise exception
-        assert result is False or result is True
+        result = provider.track_self_describing_event(
+            schema='iglu:ca.bc.gov.met/test/jsonschema/1-0-0',
+            data={'test': 'data'}
+        )
+        # Should return True (graceful degradation) even with missing tracker
+        assert result is True
 
 
 class TestAnalyticsManagerFallback:
@@ -205,7 +190,7 @@ class TestAnalyticsManagerFallback:
 
         # Primary provider that will fail
         primary = MagicMock(spec=BaseAnalyticsProvider)
-        primary.track_survey_submission = MagicMock(side_effect=Exception('Primary failed'))
+        primary.track_event = MagicMock(side_effect=Exception('Primary failed'))
 
         # Fallback provider that succeeds
         fallback = SnowplowAnalyticsProvider()
@@ -213,8 +198,15 @@ class TestAnalyticsManagerFallback:
 
         manager.initialize(primary, [fallback])
 
+        # Create a test event
+        event = AnalyticsEvent(
+            event_type='test_event',
+            category='test',
+            action='test_action'
+        )
+
         # Should succeed due to fallback
-        result = manager.track_survey_submission(123, 456)
+        result = manager.track_event(event)
         assert result is True
 
     def test_all_providers_called(self):
@@ -222,15 +214,21 @@ class TestAnalyticsManagerFallback:
         manager = AnalyticsManager()
 
         provider1 = MagicMock(spec=BaseAnalyticsProvider)
-        provider1.track_survey_submission = MagicMock(return_value=True)
+        provider1.track_event = MagicMock(return_value=True)
 
         provider2 = MagicMock(spec=BaseAnalyticsProvider)
-        provider2.track_survey_submission = MagicMock(return_value=True)
+        provider2.track_event = MagicMock(return_value=True)
 
         manager.initialize(provider1, [provider2])
 
-        manager.track_survey_submission(123, 456)
+        event = AnalyticsEvent(
+            event_type='test_event',
+            category='test',
+            action='test_action'
+        )
+
+        manager.track_event(event)
 
         # Both providers should be called
-        provider1.track_survey_submission.assert_called_once()
-        provider2.track_survey_submission.assert_called_once()
+        provider1.track_event.assert_called_once()
+        provider2.track_event.assert_called_once()

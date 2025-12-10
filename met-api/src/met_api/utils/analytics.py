@@ -108,48 +108,6 @@ class BaseAnalyticsProvider(ABC):
         pass
 
     @abstractmethod
-    def track_survey_submission(
-        self,
-        survey_id: int,
-        engagement_id: int,
-        submission_id: Optional[int] = None,
-        properties: Optional[Dict[str, Any]] = None
-    ) -> bool:
-        """Track a survey submission event."""
-        pass
-
-    @abstractmethod
-    def track_email_verification(
-        self,
-        survey_id: int,
-        engagement_id: int,
-        verification_type: Optional[str] = None,
-        properties: Optional[Dict[str, Any]] = None
-    ) -> bool:
-        """Track an email verification event."""
-        pass
-
-    @abstractmethod
-    def track_error(
-        self,
-        error_type: str,
-        error_message: str,
-        properties: Optional[Dict[str, Any]] = None
-    ) -> bool:
-        """Track an error event."""
-        pass
-
-    @abstractmethod
-    def track_page_view(
-        self,
-        page_path: str,
-        page_title: Optional[str] = None,
-        properties: Optional[Dict[str, Any]] = None
-    ) -> bool:
-        """Track a page view (for backend-generated pages)."""
-        pass
-
-    @abstractmethod
     def is_enabled(self) -> bool:
         """Check if the provider is enabled."""
         pass
@@ -203,92 +161,6 @@ class AnalyticsManager:
 
         return success
 
-    def track_survey_submission(
-        self,
-        survey_id: int,
-        engagement_id: int,
-        submission_id: Optional[int] = None,
-        properties: Optional[Dict[str, Any]] = None
-    ) -> bool:
-        """Track survey submission across all providers."""
-        if not self._initialized:
-            return True
-
-        success = False
-        for provider in self._providers:
-            try:
-                if provider.track_survey_submission(
-                    survey_id, engagement_id, submission_id, properties
-                ):
-                    success = True
-            except Exception as e:
-                logger.error(f'Error tracking submission with {provider.__class__.__name__}: {e}')
-
-        return success
-
-    def track_email_verification(
-        self,
-        survey_id: int,
-        engagement_id: int,
-        verification_type: Optional[str] = None,
-        properties: Optional[Dict[str, Any]] = None
-    ) -> bool:
-        """Track email verification across all providers."""
-        if not self._initialized:
-            return True
-
-        success = False
-        for provider in self._providers:
-            try:
-                if provider.track_email_verification(
-                    survey_id, engagement_id, verification_type, properties
-                ):
-                    success = True
-            except Exception as e:
-                logger.error(f'Error tracking verification with {provider.__class__.__name__}: {e}')
-
-        return success
-
-    def track_error(
-        self,
-        error_type: str,
-        error_message: str,
-        properties: Optional[Dict[str, Any]] = None
-    ) -> bool:
-        """Track error across all providers."""
-        if not self._initialized:
-            return True
-
-        success = False
-        for provider in self._providers:
-            try:
-                if provider.track_error(error_type, error_message, properties):
-                    success = True
-            except Exception as e:
-                logger.error(f'Error tracking error with {provider.__class__.__name__}: {e}')
-
-        return success
-
-    def track_page_view(
-        self,
-        page_path: str,
-        page_title: Optional[str] = None,
-        properties: Optional[Dict[str, Any]] = None
-    ) -> bool:
-        """Track page view across all providers."""
-        if not self._initialized:
-            return True
-
-        success = False
-        for provider in self._providers:
-            try:
-                if provider.track_page_view(page_path, page_title, properties):
-                    success = True
-            except Exception as e:
-                logger.error(f'Error tracking page view with {provider.__class__.__name__}: {e}')
-
-        return success
-
     @property
     def is_enabled(self) -> bool:
         """Check if any provider is enabled."""
@@ -300,15 +172,34 @@ _analytics_manager: Optional[AnalyticsManager] = None
 
 
 def get_analytics_manager() -> AnalyticsManager:
-    """Get or create the global analytics manager instance.
+    """Get or create the analytics manager singleton.
 
     Returns:
-        AnalyticsManager: The manager instance
+        AnalyticsManager: The analytics manager instance
     """
     global _analytics_manager
     if _analytics_manager is None:
         _analytics_manager = AnalyticsManager()
     return _analytics_manager
+
+
+# Convenience function for tracking generic events
+
+def track_event(event: AnalyticsEvent) -> bool:
+    """Track a generic analytics event.
+
+    Args:
+        event: The event to track
+
+    Returns:
+        bool: True if tracking successful
+    """
+    try:
+        manager = get_analytics_manager()
+        return manager.track_event(event)
+    except Exception as e:
+        logger.error(f'Error tracking event: {str(e)}')
+        return False
 
 
 def initialize_analytics(
@@ -323,80 +214,6 @@ def initialize_analytics(
     """
     manager = get_analytics_manager()
     manager.initialize(primary_provider, fallback_providers)
-
-
-# Convenience functions that use the global manager
-
-def track_event(event: AnalyticsEvent) -> bool:
-    """Track a generic event."""
-    try:
-        manager = get_analytics_manager()
-        return manager.track_event(event)
-    except Exception as e:
-        logger.error(f'Error tracking event: {e}')
-        return False
-
-
-def track_survey_submission(
-    survey_id: int,
-    engagement_id: int,
-    submission_id: Optional[int] = None,
-    properties: Optional[Dict[str, Any]] = None
-) -> bool:
-    """Track a survey submission event."""
-    try:
-        manager = get_analytics_manager()
-        return manager.track_survey_submission(
-            survey_id, engagement_id, submission_id, properties
-        )
-    except Exception as e:
-        logger.error(f'Error tracking survey submission: {e}')
-        return False
-
-
-def track_email_verification(
-    survey_id: int,
-    engagement_id: int,
-    verification_type: Optional[str] = None,
-    properties: Optional[Dict[str, Any]] = None
-) -> bool:
-    """Track an email verification event."""
-    try:
-        manager = get_analytics_manager()
-        return manager.track_email_verification(
-            survey_id, engagement_id, verification_type, properties
-        )
-    except Exception as e:
-        logger.error(f'Error tracking email verification: {e}')
-        return False
-
-
-def track_error(
-    error_type: str,
-    error_message: str,
-    properties: Optional[Dict[str, Any]] = None
-) -> bool:
-    """Track an error event."""
-    try:
-        manager = get_analytics_manager()
-        return manager.track_error(error_type, error_message, properties)
-    except Exception as e:
-        logger.error(f'Error tracking error: {e}')
-        return False
-
-
-def track_page_view(
-    page_path: str,
-    page_title: Optional[str] = None,
-    properties: Optional[Dict[str, Any]] = None
-) -> bool:
-    """Track a page view event."""
-    try:
-        manager = get_analytics_manager()
-        return manager.track_page_view(page_path, page_title, properties)
-    except Exception as e:
-        logger.error(f'Error tracking page view: {e}')
-        return False
 
 
 def init_analytics(app):

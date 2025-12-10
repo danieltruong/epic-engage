@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from http import HTTPStatus
 
 from flask import current_app
+from met_api.utils.snowplow_tracker import get_tracker
 
 from met_api.constants.comment_status import Status
 from met_api.constants.email_verification import EmailVerificationType
@@ -99,6 +100,20 @@ class SubmissionService:
             comments = CommentService.extract_comments_from_survey(
                 submission, survey)
             CommentService().create_comments(comments, session)
+
+            # Track survey submission event (end of conversion funnel)
+            try:
+                tracker = get_tracker()
+                if tracker.is_enabled():
+                    tracker.track_self_describing_event(
+                        'iglu:ca.bc.gov.met/survey-submission/jsonschema/1-0-0',
+                        {
+                            'survey_id': survey_id,
+                            'engagement_id': engagement_id
+                        }
+                    )
+            except Exception as exc:  # pylint: disable=broad-exception-caught  # noqa: B902
+                current_app.logger.warning(f'Failed to track survey submission event: {exc}')
 
             engagement_settings: EngagementSettingsModel =\
                 EngagementSettingsModel.find_by_id(engagement_id)

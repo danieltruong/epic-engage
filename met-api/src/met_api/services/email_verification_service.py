@@ -6,6 +6,7 @@ from http import HTTPStatus
 from flask import current_app
 from met_api.constants.email_verification import INTERNAL_EMAIL_DOMAIN, EmailVerificationType
 from met_api.constants.engagement_visibility import Visibility
+from met_api.utils.snowplow_tracker import get_tracker
 
 from met_api.constants.subscription_type import SubscriptionTypes
 from met_api.exceptions.business_exception import BusinessException
@@ -42,6 +43,26 @@ class EmailVerificationService:
         db_email_verification = EmailVerification.get(verification_token)
         email_verification = EmailVerificationSchema().dump(db_email_verification)
         cls.validate_email_verification(email_verification)
+
+        # Track survey landing page visit when user accesses survey with token (end of conversion funnel)
+        if email_verification.get('type', None) == EmailVerificationType.Survey:
+            try:
+                survey_id = email_verification.get('survey_id')
+                if survey_id:
+                    survey = SurveyModel.find_by_id(survey_id)
+                    tracker = get_tracker()
+                    if tracker.is_enabled() and survey:
+                        tracker.track_self_describing_event(
+                            'iglu:ca.bc.gov.met/survey-landing-page-visit/jsonschema/1-0-0',
+                            {
+                                'survey_id': survey_id,
+                                'engagement_id': survey.engagement_id,
+                                'verification_token': verification_token
+                            }
+                        )
+            except Exception as exc:  # pylint: disable=broad-exception-caught  # noqa: B902
+                current_app.logger.warning(f'Failed to track survey landing page visit event: {exc}')
+
         return email_verification
 
     @classmethod
@@ -68,8 +89,40 @@ class EmailVerificationService:
         verification_token = uuid.uuid4()
         EmailVerification.create({**email_verification, 'verification_token': verification_token}, session)
 
-        if email_verification.get('type', None) == EmailVerificationType.RejectedComment:
-            email_verification['verification_token'] = verification_token
+        # Always include verification_token in response for analytics tracking
+        email_verification['verification_token'] = str(verification_token)
+
+        # Track email verification sent event (start of conversion funnel)
+        verification_type = email_verification.get('type', None)
+        if verification_type == EmailVerificationType.Survey:
+            try:
+                tracker = get_tracker()
+                if tracker.is_enabled():
+                    tracker.track_self_describing_event(
+                        'iglu:ca.bc.gov.met/email-verification-sent/jsonschema/1-0-0',
+                        {
+                            'survey_id': email_verification.get('survey_id'),
+                            'engagement_id': survey.engagement_id,
+                            'verification_token': str(verification_token)
+                        }
+                    )
+            except Exception as exc:  # pylint: disable=broad-exception-caught  # noqa: B902
+                current_app.logger.warning(f'Failed to track email verification sent event: {exc}')
+        elif verification_type == EmailVerificationType.Subscribe:
+            # Track subscription email verification
+            try:
+                tracker = get_tracker()
+                if tracker.is_enabled():
+                    tracker.track_self_describing_event(
+                        'iglu:ca.bc.gov.met/subscription-email-sent/jsonschema/1-0-0',
+                        {
+                            'survey_id': email_verification.get('survey_id'),
+                            'engagement_id': survey.engagement_id,
+                            'subscription_type': subscription_type
+                        }
+                    )
+            except Exception as exc:  # pylint: disable=broad-exception-caught  # noqa: B902
+                current_app.logger.warning(f'Failed to track subscription email sent event: {exc}')
 
         # TODO: remove this once email logic is brought over from submission service to here
         if email_verification.get('type', None) != EmailVerificationType.RejectedComment:
